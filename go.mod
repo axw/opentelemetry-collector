@@ -24,6 +24,7 @@ require (
 	github.com/hashicorp/consul/api v1.2.0 // indirect
 	github.com/jaegertracing/jaeger v1.14.0
 	github.com/jstemmer/go-junit-report v0.0.0-20190106144839-af01ea7f8024
+	github.com/kr/pretty v0.1.0
 	github.com/mitchellh/mapstructure v1.1.2
 	github.com/openzipkin/zipkin-go v0.2.1
 	github.com/orijtech/prometheus-go-metrics-exporter v0.0.3-0.20190313163149-b321c5297f60
@@ -44,6 +45,7 @@ require (
 	github.com/uber/jaeger-client-go v2.16.0+incompatible // indirect
 	github.com/uber/jaeger-lib v2.0.0+incompatible
 	github.com/uber/tchannel-go v1.10.0
+	go.elastic.co/apm v1.5.1-0.20191010071241-7b7289bd79c2
 	go.opencensus.io v0.22.1
 	go.uber.org/zap v1.10.0
 	golang.org/x/lint v0.0.0-20190409202823-959b441ac422

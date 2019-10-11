@@ -18,6 +18,7 @@ package defaults
 import (
 	"github.com/open-telemetry/opentelemetry-collector/config"
 	"github.com/open-telemetry/opentelemetry-collector/exporter"
+	"github.com/open-telemetry/opentelemetry-collector/exporter/elasticexporter"
 	"github.com/open-telemetry/opentelemetry-collector/exporter/jaeger/jaegergrpcexporter"
 	"github.com/open-telemetry/opentelemetry-collector/exporter/jaeger/jaegerthrifthttpexporter"
 	"github.com/open-telemetry/opentelemetry-collector/exporter/loggingexporter"
@@ -72,6 +73,7 @@ func Components() (
 	}
 
 	exporters, err := exporter.Build(
+		&elasticexporter.Factory{},
 		&opencensusexporter.Factory{},
 		&prometheusexporter.Factory{},
 		&loggingexporter.Factory{},
