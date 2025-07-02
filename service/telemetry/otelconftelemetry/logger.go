@@ -1,19 +1,25 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package telemetry // import "go.opentelemetry.io/collector/service/telemetry"
+package otelconftelemetry // import "go.opentelemetry.io/collector/service/telemetry"
 
 import (
-	"go.opentelemetry.io/otel/attribute"
+	"context"
+
+	config "go.opentelemetry.io/contrib/otelconf/v0.3.0"
 	"go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/sdk/resource"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
 	"go.opentelemetry.io/collector/internal/telemetry/componentattribute"
+	"go.opentelemetry.io/collector/service/telemetry"
 )
 
 // newLogger creates a Logger and a LoggerProvider from Config.
-func newLogger(set Settings, cfg Config) (*zap.Logger, log.LoggerProvider, error) {
+func newLogger(ctx context.Context, set telemetry.Settings, cfg *Config, res *resource.Resource, sdk *config.SDK) (
+	_ *zap.Logger, _ log.LoggerProvider, resultErr error,
+) {
 	// Copied from NewProductionConfig.
 	ec := zap.NewProductionEncoderConfig()
 	ec.EncodeTime = zapcore.ISO8601TimeEncoder
@@ -46,10 +52,10 @@ func newLogger(set Settings, cfg Config) (*zap.Logger, log.LoggerProvider, error
 	// We do NOT add them to the logger using With, because that would apply to all logs, even ones
 	// exported through the core that wraps the LoggerProvider, meaning that the attributes would
 	// be exported twice.
-	if set.Resource != nil && len(set.Resource.Attributes()) > 0 {
+	if len(res.Attributes()) > 0 {
 		logger = logger.WithOptions(zap.WrapCore(func(c zapcore.Core) zapcore.Core {
 			var fields []zap.Field
-			for _, attr := range set.Resource.Attributes() {
+			for _, attr := range res.Attributes() {
 				fields = append(fields, zap.String(string(attr.Key), attr.Value.Emit()))
 			}
 
@@ -58,29 +64,17 @@ func newLogger(set Settings, cfg Config) (*zap.Logger, log.LoggerProvider, error
 		}))
 	}
 
-	var lp log.LoggerProvider
-	logger = logger.WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {
-		core = componentattribute.NewConsoleCoreWithAttributes(core, attribute.NewSet())
+	if cfg.Logs.Sampling != nil && cfg.Logs.Sampling.Enabled {
+		logger = logger.WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {
+			return newSampledCore(core, cfg.Logs.Sampling)
+		}))
+	}
 
-		if len(cfg.Logs.Processors) > 0 && set.SDK != nil {
-			lp = set.SDK.LoggerProvider()
-			core = componentattribute.NewOTelTeeCoreWithAttributes(
-				core,
-				lp,
-				"go.opentelemetry.io/collector/service/telemetry",
-				cfg.Logs.Level,
-				attribute.NewSet(),
-			)
-		}
-
-		if cfg.Logs.Sampling != nil && cfg.Logs.Sampling.Enabled {
-			core = newSampledCore(core, cfg.Logs.Sampling)
-		}
-
-		return core
-	}))
-
-	return logger, lp, nil
+	loggerProvider := &minsevLoggerProvider{
+		LoggerProvider: sdk.LoggerProvider(),
+		severity:       convertLevel(zapCfg.Level.Level()),
+	}
+	return logger, loggerProvider, nil
 }
 
 func newSampledCore(core zapcore.Core, sc *LogsSamplingConfig) zapcore.Core {
@@ -92,4 +86,52 @@ func newSampledCore(core zapcore.Core, sc *LogsSamplingConfig) zapcore.Core {
 		sc.Initial,
 		sc.Thereafter,
 	)
+}
+
+// minsevLoggerProvider wraps a LoggerProvider, and filters logs based on the
+// configured zap logger level. Ideally we would use the opentelemetry-go-contrib
+// minsev processor, but it is not currently possible to pass in processors when
+// constructing a LoggerProvider via otelconf.
+type minsevLoggerProvider struct {
+	log.LoggerProvider
+	severity log.Severity
+}
+
+func (p *minsevLoggerProvider) Logger(name string, options ...log.LoggerOption) log.Logger {
+	logger := p.LoggerProvider.Logger(name, options...)
+	return &minsevLogger{Logger: logger, severity: p.severity}
+}
+
+type minsevLogger struct {
+	log.Logger
+	severity log.Severity
+}
+
+func (l *minsevLogger) Enabled(ctx context.Context, param log.EnabledParameters) bool {
+	if param.Severity < l.severity {
+		return false
+	}
+	return l.Logger.Enabled(ctx, param)
+}
+
+// Copied from otelzap
+func convertLevel(level zapcore.Level) log.Severity {
+	switch level {
+	case zapcore.DebugLevel:
+		return log.SeverityDebug
+	case zapcore.InfoLevel:
+		return log.SeverityInfo
+	case zapcore.WarnLevel:
+		return log.SeverityWarn
+	case zapcore.ErrorLevel:
+		return log.SeverityError
+	case zapcore.DPanicLevel:
+		return log.SeverityFatal1
+	case zapcore.PanicLevel:
+		return log.SeverityFatal2
+	case zapcore.FatalLevel:
+		return log.SeverityFatal3
+	default:
+		return log.SeverityUndefined
+	}
 }

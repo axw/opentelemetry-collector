@@ -1,7 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package telemetry
+package otelconftelemetry
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 	config "go.opentelemetry.io/contrib/otelconf/v0.3.0"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	semconv "go.opentelemetry.io/otel/semconv/v1.18.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.13.0"
 
 	"go.opentelemetry.io/collector/config/configtelemetry"
 	"go.opentelemetry.io/collector/service/internal/promtest"
@@ -33,69 +33,67 @@ const (
 
 var testInstanceID = "test_instance_id"
 
-func TestTelemetryInit(t *testing.T) {
+func TestTelemetry_MeterProvider_Prometheus(t *testing.T) {
 	type metricValue struct {
 		value  float64
 		labels map[string]string
 	}
 
-	for _, tt := range []struct {
-		name            string
-		expectedMetrics map[string]metricValue
-	}{
-		{
-			name: "UseOpenTelemetryForInternalMetrics",
-			expectedMetrics: map[string]metricValue{
-				metricPrefix + otelPrefix + counterName: {
-					value: 13,
-					labels: map[string]string{
-						"service_name":        "otelcol",
-						"service_version":     "latest",
-						"service_instance_id": testInstanceID,
-					},
-				},
-				metricPrefix + grpcPrefix + counterName: {
-					value: 11,
-					labels: map[string]string{
-						"net_sock_peer_addr":  "",
-						"net_sock_peer_name":  "",
-						"net_sock_peer_port":  "",
-						"service_name":        "otelcol",
-						"service_version":     "latest",
-						"service_instance_id": testInstanceID,
-					},
-				},
-				metricPrefix + httpPrefix + counterName: {
-					value: 10,
-					labels: map[string]string{
-						"net_host_name":       "",
-						"net_host_port":       "",
-						"service_name":        "otelcol",
-						"service_version":     "latest",
-						"service_instance_id": testInstanceID,
-					},
-				},
-				"target_info": {
-					value: 0,
-					labels: map[string]string{
-						"service_name":        "otelcol",
-						"service_version":     "latest",
-						"service_instance_id": testInstanceID,
-					},
-				},
-				"promhttp_metric_handler_errors_total": {
-					value: 0,
-					labels: map[string]string{
-						"cause": "encoding",
-					},
-				},
+	expectedMetrics := map[string]metricValue{
+		metricPrefix + otelPrefix + counterName: {
+			value: 13,
+			labels: map[string]string{
+				"service_name":        "otelcol",
+				"service_version":     "latest",
+				"service_instance_id": testInstanceID,
 			},
 		},
+		metricPrefix + grpcPrefix + counterName: {
+			value: 11,
+			labels: map[string]string{
+				"net_sock_peer_addr":  "",
+				"net_sock_peer_name":  "",
+				"net_sock_peer_port":  "",
+				"service_name":        "otelcol",
+				"service_version":     "latest",
+				"service_instance_id": testInstanceID,
+			},
+		},
+		metricPrefix + httpPrefix + counterName: {
+			value: 10,
+			labels: map[string]string{
+				"net_host_name":       "",
+				"net_host_port":       "",
+				"service_name":        "otelcol",
+				"service_version":     "latest",
+				"service_instance_id": testInstanceID,
+			},
+		},
+		"target_info": {
+			value: 0,
+			labels: map[string]string{
+				"service_name":        "otelcol",
+				"service_version":     "latest",
+				"service_instance_id": testInstanceID,
+			},
+		},
+		"promhttp_metric_handler_errors_total": {
+			value: 0,
+			labels: map[string]string{
+				"cause": "encoding",
+			},
+		},
+	}
+
+	for network, prom := range map[string]*config.Prometheus{
+		"ipv4": promtest.GetAvailableLocalAddressPrometheus(t),
+		"ipv6": promtest.GetAvailableLocalIPv6AddressPrometheus(t),
 	} {
-		prom := promtest.GetAvailableLocalAddressPrometheus(t)
-		endpoint := fmt.Sprintf("http://%s:%d/metrics", *prom.Host, *prom.Port)
-		cfg := Config{
-			Metrics: MetricsConfig{
+		t.Run(network, func(t *testing.T) {
+			endpoint := fmt.Sprintf("http://%s:%d/metrics", *prom.Host, *prom.Port)
+
+			cfg := createDefaultConfig().(*Config)
+			cfg.Metrics = MetricsConfig{
 				Level: configtelemetry.LevelDetailed,
 				MeterProvider: config.MeterProvider{
 					Readers: []config.MetricReader{{
@@ -104,41 +102,21 @@ func TestTelemetryInit(t *testing.T) {
 						},
 					}},
 				},
-			},
-		}
-		t.Run(tt.name, func(t *testing.T) {
-			sdk, err := config.NewSDK(
-				config.WithContext(context.Background()),
-				config.WithOpenTelemetryConfiguration(config.OpenTelemetryConfiguration{
-					MeterProvider: &config.MeterProvider{
-						Readers: cfg.Metrics.Readers,
-					},
-					Resource: &config.Resource{
-						SchemaUrl: ptr(""),
-						Attributes: []config.AttributeNameValue{
-							{Name: string(semconv.ServiceInstanceIDKey), Value: testInstanceID},
-							{Name: string(semconv.ServiceNameKey), Value: "otelcol"},
-							{Name: string(semconv.ServiceVersionKey), Value: "latest"},
-						},
-					},
-				}),
-			)
-			require.NoError(t, err)
+			}
+			cfg.Resource = map[string]*string{
+				string(semconv.ServiceInstanceIDKey): ptr(testInstanceID),
+				string(semconv.ServiceNameKey):       ptr("otelcol"),
+				string(semconv.ServiceVersionKey):    ptr("latest"),
+			}
 
-			mp, err := newMeterProvider(Settings{SDK: &sdk}, cfg)
-			require.NoError(t, err)
-			defer func() {
-				if prov, ok := mp.(interface{ Shutdown(context.Context) error }); ok {
-					require.NoError(t, prov.Shutdown(context.Background()))
-				}
-			}()
-
+			tel, _ := newTestTelemetry(t, cfg)
+			mp := tel.MeterProvider()
 			createTestMetrics(t, mp)
 
 			metrics := getMetricsFromPrometheus(t, endpoint)
-			require.Len(t, metrics, len(tt.expectedMetrics))
+			require.Len(t, metrics, len(expectedMetrics))
 
-			for metricName, metricValue := range tt.expectedMetrics {
+			for metricName, metricValue := range expectedMetrics {
 				mf, present := metrics[metricName]
 				require.True(t, present, "expected metric %q was not present", metricName)
 				if metricName == "promhttp_metric_handler_errors_total" {
@@ -214,42 +192,20 @@ func getMetricsFromPrometheus(t *testing.T, endpoint string) map[string]*io_prom
 
 // Test that the MeterProvider implements the 'Enabled' functionality.
 // See https://pkg.go.dev/go.opentelemetry.io/otel/sdk/metric/internal/x#readme-instrument-enabled.
-func TestInstrumentEnabled(t *testing.T) {
+func TestTelemetry_MeterProvider_InstrumentEnabled(t *testing.T) {
 	prom := promtest.GetAvailableLocalAddressPrometheus(t)
-	cfg := Config{
-		Metrics: MetricsConfig{
-			Level: configtelemetry.LevelDetailed,
-			MeterProvider: config.MeterProvider{
-				Readers: []config.MetricReader{{
-					Pull: &config.PullMetricReader{Exporter: config.PullMetricExporter{Prometheus: prom}},
-				}},
-			},
+	cfg := createDefaultConfig().(*Config)
+	cfg.Metrics = MetricsConfig{
+		Level: configtelemetry.LevelDetailed,
+		MeterProvider: config.MeterProvider{
+			Readers: []config.MetricReader{{
+				Pull: &config.PullMetricReader{Exporter: config.PullMetricExporter{Prometheus: prom}},
+			}},
 		},
 	}
-	sdk, err := config.NewSDK(
-		config.WithContext(context.Background()),
-		config.WithOpenTelemetryConfiguration(config.OpenTelemetryConfiguration{
-			MeterProvider: &config.MeterProvider{
-				Readers: cfg.Metrics.Readers,
-			},
-			Resource: &config.Resource{
-				SchemaUrl: ptr(""),
-				Attributes: []config.AttributeNameValue{
-					{Name: string(semconv.ServiceInstanceIDKey), Value: testInstanceID},
-					{Name: string(semconv.ServiceNameKey), Value: "otelcol"},
-					{Name: string(semconv.ServiceVersionKey), Value: "latest"},
-				},
-			},
-		}),
-	)
-	require.NoError(t, err)
-	meterProvider, err := newMeterProvider(Settings{SDK: &sdk}, cfg)
-	defer func() {
-		if prov, ok := meterProvider.(interface{ Shutdown(context.Context) error }); ok {
-			require.NoError(t, prov.Shutdown(context.Background()))
-		}
-	}()
-	require.NoError(t, err)
+
+	tel, _ := newTestTelemetry(t, cfg)
+	meterProvider := tel.MeterProvider()
 
 	meter := meterProvider.Meter("go.opentelemetry.io/collector/service/telemetry")
 
@@ -294,8 +250,4 @@ func TestInstrumentEnabled(t *testing.T) {
 	require.NoError(t, err)
 	_, ok = floatGauge.(enabledInstrument)
 	assert.True(t, ok, "Float64Gauge does not implement the experimental 'Enabled' method")
-}
-
-func ptr[T any](v T) *T {
-	return &v
 }

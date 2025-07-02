@@ -1,16 +1,25 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package telemetry // import "go.opentelemetry.io/collector/service/telemetry"
+package otelconftelemetry // import "go.opentelemetry.io/collector/service/telemetry"
 
 import (
 	"errors"
 
 	"go.opentelemetry.io/collector/config/configtelemetry"
-	"go.opentelemetry.io/collector/service/telemetry/internal/migration"
+	"go.opentelemetry.io/collector/featuregate"
+	"go.opentelemetry.io/collector/service/telemetry/otelconftelemetry/internal/migration"
 )
 
-// Config defines the configurable settings for service telemetry.
+// disableHighCardinalityMetricsFeatureGate is the feature gate that controls whether the collector should enable
+// potentially high cardinality metrics. The gate will be removed when the collector allows for view configuration.
+var disableHighCardinalityMetricsFeatureGate = featuregate.GlobalRegistry().MustRegister(
+	"telemetry.disableHighCardinalityMetrics",
+	featuregate.StageAlpha,
+	featuregate.WithRegisterDescription("controls whether the collector should enable potentially high"+
+		"cardinality metrics. The gate will be removed when the collector allows for view configuration."))
+
+// Config defines the otelconf-based configuration settings for service telemetry.
 type Config struct {
 	Logs    LogsConfig    `mapstructure:"logs"`
 	Metrics MetricsConfig `mapstructure:"metrics"`
@@ -41,16 +50,19 @@ type MetricsConfig = migration.MetricsConfigV030
 // Experimental: *NOTE* this structure is subject to change or removal in the future.
 type TracesConfig = migration.TracesConfigV030
 
-// Validate checks whether the current configuration is valid
+// Validate checks whether the configuration is valid.
 func (c *Config) Validate() error {
 	// Check when service telemetry metric level is not none, the metrics readers should not be empty
 	if c.Metrics.Level != configtelemetry.LevelNone && len(c.Metrics.Readers) == 0 {
 		return errors.New("collector telemetry metrics reader should exist when metric level is not none")
 	}
-
-	if c.Metrics.Views != nil && c.Metrics.Level != configtelemetry.LevelDetailed {
-		return errors.New("service::telemetry::metrics::views can only be set when service::telemetry::metrics::level is detailed")
+	if c.Metrics.Views != nil {
+		if c.Metrics.Level != configtelemetry.LevelDetailed {
+			return errors.New("service::telemetry::metrics::views can only be set when service::telemetry::metrics::level is detailed")
+		}
+		if disableHighCardinalityMetricsFeatureGate.IsEnabled() {
+			return errors.New("telemetry.disableHighCardinalityMetrics gate is incompatible with service::telemetry::metrics::views")
+		}
 	}
-
 	return nil
 }

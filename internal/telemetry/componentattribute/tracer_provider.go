@@ -16,28 +16,41 @@ type tracerProviderWithAttributes struct {
 	attrs []attribute.KeyValue
 }
 
-// Necessary for components that use SDK-only methods, such as zpagesextension
-type tracerProviderWithAttributesSdk struct {
-	*sdkTrace.TracerProvider
-	attrs []attribute.KeyValue
+// racerProviderWithAttributesRegisterable is an extension of tracerProviderWithAttributes
+// that also exposes the sdk/trace.TracerProvider type's RegisterSpanProcessor and
+// UnregisterSpanProcessor methods, as used by zpages.
+type tracerProviderWithAttributesRegisterable struct {
+	tracerProviderWithAttributes
+	registerableTracerProvider
+}
+
+type registerableTracerProvider interface {
+	RegisterSpanProcessor(sdkTrace.SpanProcessor)
+	UnregisterSpanProcessor(sdkTrace.SpanProcessor)
 }
 
 // TracerProviderWithAttributes creates a TracerProvider with a new set of injected instrumentation scope attributes.
 func TracerProviderWithAttributes(tp trace.TracerProvider, attrs attribute.Set) trace.TracerProvider {
-	if tpwa, ok := tp.(tracerProviderWithAttributesSdk); ok {
-		tp = tpwa.TracerProvider
-	} else if tpwa, ok := tp.(tracerProviderWithAttributes); ok {
-		tp = tpwa.TracerProvider
-	}
-	if tpSdk, ok := tp.(*sdkTrace.TracerProvider); ok {
-		return tracerProviderWithAttributesSdk{
-			TracerProvider: tpSdk,
+	switch tp := tp.(type) {
+	case tracerProviderWithAttributes:
+		tp.attrs = attrs.ToSlice()
+		return tp
+	case tracerProviderWithAttributesRegisterable:
+		tp.attrs = attrs.ToSlice()
+		return tp
+	default:
+		// Not yet wrapped.
+		tpwa := tracerProviderWithAttributes{
+			TracerProvider: tp,
 			attrs:          attrs.ToSlice(),
 		}
-	}
-	return tracerProviderWithAttributes{
-		TracerProvider: tp,
-		attrs:          attrs.ToSlice(),
+		if r, ok := tp.(registerableTracerProvider); ok {
+			return tracerProviderWithAttributesRegisterable{
+				tracerProviderWithAttributes: tpwa,
+				registerableTracerProvider:   r,
+			}
+		}
+		return tpwa
 	}
 }
 
@@ -52,9 +65,5 @@ func tracerWithAttributes(tp trace.TracerProvider, attrs []attribute.KeyValue, n
 }
 
 func (tpwa tracerProviderWithAttributes) Tracer(name string, options ...trace.TracerOption) trace.Tracer {
-	return tracerWithAttributes(tpwa.TracerProvider, tpwa.attrs, name, options...)
-}
-
-func (tpwa tracerProviderWithAttributesSdk) Tracer(name string, options ...trace.TracerOption) trace.Tracer {
 	return tracerWithAttributes(tpwa.TracerProvider, tpwa.attrs, name, options...)
 }
