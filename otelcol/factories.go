@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/collector/extension"
 	"go.opentelemetry.io/collector/processor"
 	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/service/telemetry"
 )
 
 // Factories struct holds in a single type all component factories that
@@ -32,6 +33,12 @@ type Factories struct {
 	// Connectors maps connector type names in the config to the respective factory.
 	Connectors map[component.Type]connector.Factory
 
+	// Telemetry is the telemetry provider factory to use.
+	//
+	// If Telemetry is nil, the otelconftelemetry factory will be used by default
+	// for backwards compatibility.
+	Telemetry telemetry.Factory
+
 	// ReceiverModules maps receiver types to their respective go modules.
 	ReceiverModules map[component.Type]string
 
@@ -46,6 +53,9 @@ type Factories struct {
 
 	// ConnectorModules maps connector types to their respective go modules.
 	ConnectorModules map[component.Type]string
+
+	// TelemetryModule holds the telemetry factory's respective go module.
+	TelemetryModule string
 }
 
 // MakeFactoryMap takes a list of factories and returns a map with Factory type as keys.

@@ -4,21 +4,23 @@
 package service
 
 import (
-	"bufio"
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/prometheus/common/expfmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	config "go.opentelemetry.io/contrib/otelconf/v0.3.0"
+	otelconf "go.opentelemetry.io/contrib/otelconf/v0.3.0"
+	"go.opentelemetry.io/contrib/zpages"
+	"go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/log/logtest"
+	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -31,154 +33,19 @@ import (
 	"go.opentelemetry.io/collector/extension"
 	"go.opentelemetry.io/collector/extension/zpagesextension"
 	"go.opentelemetry.io/collector/internal/testutil"
-	"go.opentelemetry.io/collector/pdata/pcommon"
-	"go.opentelemetry.io/collector/pdata/plog"
-	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pipeline"
 	"go.opentelemetry.io/collector/pipeline/xpipeline"
 	"go.opentelemetry.io/collector/service/extensions"
 	"go.opentelemetry.io/collector/service/internal/builders"
-	"go.opentelemetry.io/collector/service/internal/promtest"
 	"go.opentelemetry.io/collector/service/pipelines"
+	"go.opentelemetry.io/collector/service/telemetry"
 	"go.opentelemetry.io/collector/service/telemetry/otelconftelemetry"
+	"go.opentelemetry.io/collector/service/telemetry/telemetrytest"
 )
-
-type labelState int
 
 const (
-	labelNotPresent labelState = iota
-	labelSpecificValue
-	labelAnyValue
+	otelCommand = "otelcoltest"
 )
-
-type labelValue struct {
-	label string
-	state labelState
-}
-
-type ownMetricsTestCase struct {
-	name                string
-	userDefinedResource map[string]*string
-	expectedLabels      map[string]labelValue
-}
-
-var (
-	testResourceAttrValue = "resource_attr_test_value"
-	testInstanceID        = "test_instance_id"
-	testServiceVersion    = "2022-05-20"
-	testServiceName       = "test name"
-)
-
-// prometheusToOtelConv is used to check that the expected resource labels exist as
-// part of the otel resource attributes.
-var prometheusToOtelConv = map[string]string{
-	"service_instance_id": "service.instance.id",
-	"service_name":        "service.name",
-	"service_version":     "service.version",
-}
-
-const (
-	metricsVersion = "test version"
-	otelCommand    = "otelcoltest"
-)
-
-func ownMetricsTestCases() []ownMetricsTestCase {
-	return []ownMetricsTestCase{
-		{
-			name:                "no resource",
-			userDefinedResource: nil,
-			// All labels added to all collector metrics by default are listed below.
-			// These labels are hard coded here in order to avoid inadvertent changes:
-			// at this point changing labels should be treated as a breaking changing
-			// and requires a good justification. The reason is that changes to metric
-			// names or labels can break alerting, dashboards, etc that are used to
-			// monitor the Collector in production deployments.
-			expectedLabels: map[string]labelValue{
-				"service_instance_id": {state: labelAnyValue},
-				"service_name":        {label: otelCommand, state: labelSpecificValue},
-				"service_version":     {label: metricsVersion, state: labelSpecificValue},
-			},
-		},
-		{
-			name: "resource with custom attr",
-			userDefinedResource: map[string]*string{
-				"custom_resource_attr": &testResourceAttrValue,
-			},
-			expectedLabels: map[string]labelValue{
-				"service_instance_id":  {state: labelAnyValue},
-				"service_name":         {label: otelCommand, state: labelSpecificValue},
-				"service_version":      {label: metricsVersion, state: labelSpecificValue},
-				"custom_resource_attr": {label: "resource_attr_test_value", state: labelSpecificValue},
-			},
-		},
-		{
-			name: "override service.name",
-			userDefinedResource: map[string]*string{
-				"service.name": &testServiceName,
-			},
-			expectedLabels: map[string]labelValue{
-				"service_instance_id": {state: labelAnyValue},
-				"service_name":        {label: testServiceName, state: labelSpecificValue},
-				"service_version":     {label: metricsVersion, state: labelSpecificValue},
-			},
-		},
-		{
-			name: "suppress service.name",
-			userDefinedResource: map[string]*string{
-				"service.name": nil,
-			},
-			expectedLabels: map[string]labelValue{
-				"service_instance_id": {state: labelAnyValue},
-				"service_name":        {state: labelNotPresent},
-				"service_version":     {label: metricsVersion, state: labelSpecificValue},
-			},
-		},
-		{
-			name: "override service.instance.id",
-			userDefinedResource: map[string]*string{
-				"service.instance.id": &testInstanceID,
-			},
-			expectedLabels: map[string]labelValue{
-				"service_instance_id": {label: "test_instance_id", state: labelSpecificValue},
-				"service_name":        {label: otelCommand, state: labelSpecificValue},
-				"service_version":     {label: metricsVersion, state: labelSpecificValue},
-			},
-		},
-		{
-			name: "suppress service.instance.id",
-			userDefinedResource: map[string]*string{
-				"service.instance.id": nil, // nil value in config is used to suppress attributes.
-			},
-			expectedLabels: map[string]labelValue{
-				"service_instance_id": {state: labelNotPresent},
-				"service_name":        {label: otelCommand, state: labelSpecificValue},
-				"service_version":     {label: metricsVersion, state: labelSpecificValue},
-			},
-		},
-		{
-			name: "override service.version",
-			userDefinedResource: map[string]*string{
-				"service.version": &testServiceVersion,
-			},
-			expectedLabels: map[string]labelValue{
-				"service_instance_id": {state: labelAnyValue},
-				"service_name":        {label: otelCommand, state: labelSpecificValue},
-				"service_version":     {label: "2022-05-20", state: labelSpecificValue},
-			},
-		},
-		{
-			name: "suppress service.version",
-			userDefinedResource: map[string]*string{
-				"service.version": nil, // nil value in config is used to suppress attributes.
-			},
-			expectedLabels: map[string]labelValue{
-				"service_instance_id": {state: labelAnyValue},
-				"service_name":        {label: otelCommand, state: labelSpecificValue},
-				"service_version":     {state: labelNotPresent},
-			},
-		},
-	}
-}
 
 var (
 	nopType   = component.MustNewType("nop")
@@ -272,50 +139,23 @@ func TestServiceTelemetryCleanupOnError(t *testing.T) {
 }
 
 func TestServiceTelemetryLogging(t *testing.T) {
-	// Create a server for receiving OTLP logs.
-	var received []plog.Logs
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/logs", func(_ http.ResponseWriter, req *http.Request) {
-		body, err := io.ReadAll(req.Body)
-		assert.NoError(t, err)
-
-		exportRequest := plogotlp.NewExportRequest()
-		assert.NoError(t, exportRequest.UnmarshalProto(body))
-		received = append(received, exportRequest.Logs())
-	})
-	httpServer := httptest.NewServer(mux)
-	defer httpServer.Close()
-
-	// We'll divert zap logs to an observer.
 	observerCore, observedLogs := observer.New(zapcore.WarnLevel)
+	zapLogger := zap.New(observerCore)
+	recorder := logtest.NewRecorder()
 
 	set := newNopSettings()
 	set.BuildInfo = component.BuildInfo{Version: "test version", Command: otelCommand}
-	set.LoggingOptions = []zap.Option{
-		zap.WrapCore(func(zapcore.Core) zapcore.Core {
-			return observerCore
-		}),
-	}
+	set.TelemetryFactory = telemetry.NewFactory(
+		func() component.Config { return nil },
+		func(context.Context, telemetry.Settings, component.Config) (telemetry.Providers, error) {
+			return telemetrytest.NewProviders(
+				telemetrytest.WithLogger(zapLogger),
+				telemetrytest.WithLoggerProvider(recorder),
+			), nil
+		},
+	)
 
 	cfg := newNopConfig()
-	cfg.Telemetry.Logs.Sampling = &otelconftelemetry.LogsSamplingConfig{
-		Enabled:    true,
-		Tick:       time.Minute,
-		Initial:    2,
-		Thereafter: 0,
-	}
-	cfg.Telemetry.Logs.Processors = []config.LogRecordProcessor{{
-		Simple: &config.SimpleLogRecordProcessor{
-			Exporter: config.LogRecordExporter{
-				OTLP: &config.OTLP{
-					Endpoint: ptr(httpServer.URL),
-					Protocol: ptr("http/protobuf"),
-					Insecure: ptr(true),
-				},
-			},
-		},
-	}}
-
 	srv, err := New(context.Background(), set, cfg)
 	require.NoError(t, err)
 	require.NoError(t, srv.Start(context.Background()))
@@ -323,83 +163,114 @@ func TestServiceTelemetryLogging(t *testing.T) {
 		assert.NoError(t, srv.Shutdown(context.Background()))
 	}()
 
-	// The level we configured on the initial Zap logger should have
-	// propagated to the final one provided to components.
 	require.NotNil(t, srv.telemetrySettings.Logger)
 	assert.Equal(t, zapcore.WarnLevel, srv.telemetrySettings.Logger.Level())
+	srv.telemetrySettings.Logger.Warn("warn_message")
+	srv.telemetrySettings.Logger.Info("info_message")
 
-	// Log 5 messages at different levels. Only the warning messages should
-	// be accepted, and only 2 of those due to sampling.
-	for i := 0; i < 5; i++ {
-		srv.telemetrySettings.Logger.Warn("warn_message")
-		srv.telemetrySettings.Logger.Info("info_message")
-		srv.telemetrySettings.Logger.Debug("debug_message")
-	}
-	assert.Equal(t, 2, observedLogs.Len())
-	assert.Equal(t, 2, observedLogs.FilterMessage("warn_message").Len())
-	require.Len(t, received, 2)
-	for _, logs := range received {
-		assert.Equal(t,
-			"warn_message",
-			logs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Body().AsString(),
-		)
-	}
+	entries := observedLogs.All()
+	require.Len(t, entries, 1)
+	assert.Equal(t, "warn_message", entries[0].Message)
+
+	logtest.AssertEqual(t, logtest.Recording{
+		logtest.Scope{
+			Name: "go.opentelemetry.io/collector/service",
+		}: []logtest.Record{{
+			Context:      context.Background(),
+			Timestamp:    time.Time{},
+			Severity:     log.SeverityWarn,
+			SeverityText: "warn",
+			Body:         log.StringValue("warn_message"),
+			Attributes:   []log.KeyValue{},
+		}},
+	}, recorder.Result(),
+		logtest.Transform(func(recording logtest.Recording) logtest.Recording {
+			// Remove empty scopes.
+			newRecording := make(logtest.Recording)
+			for scope, records := range recording {
+				if len(records) != 0 {
+					newRecording[scope] = records
+				}
+			}
+			return newRecording
+		}),
+		logtest.Transform(func(record logtest.Record) logtest.Record {
+			// Clear timestamp and any attributes for easier testing.
+			record.Timestamp = time.Time{}
+			record.Attributes = nil
+			return record
+		}),
+	)
 }
 
 func TestServiceTelemetryMetrics(t *testing.T) {
-	for _, tc := range ownMetricsTestCases() {
-		t.Run("ipv4_"+tc.name, func(t *testing.T) {
-			testCollectorStartHelperWithReaders(t, tc, promtest.GetAvailableLocalAddressPrometheus(t))
-		})
-		t.Run("ipv6_"+tc.name, func(t *testing.T) {
-			testCollectorStartHelperWithReaders(t, tc, promtest.GetAvailableLocalIPv6AddressPrometheus(t))
-		})
+	// Start a service and check that metrics are produced as expected.
+	// We do this twice to ensure that the server is stopped cleanly.
+	for range 2 {
+		reader := metric.NewManualReader()
+		set := newNopSettings()
+		set.TelemetryFactory = telemetry.NewFactory(
+			func() component.Config { return nil },
+			func(context.Context, telemetry.Settings, component.Config) (telemetry.Providers, error) {
+				return telemetrytest.NewProviders(
+					telemetrytest.WithMeterProvider(
+						metric.NewMeterProvider(
+							metric.WithReader(reader),
+						),
+					),
+				), nil
+			},
+		)
+
+		srv, err := New(context.Background(), set, newNopConfig())
+		require.NoError(t, err)
+		require.NoError(t, srv.Start(context.Background()))
+
+		var rm metricdata.ResourceMetrics
+		err = reader.Collect(context.Background(), &rm)
+		require.NoError(t, err)
+
+		assertMetrics(t, rm)
+		require.NoError(t, srv.Shutdown(context.Background()))
 	}
 }
 
-func testCollectorStartHelperWithReaders(t *testing.T, tc ownMetricsTestCase, metricsAddr *config.Prometheus) {
+func assertMetrics(t *testing.T, rm metricdata.ResourceMetrics) {
+	require.Len(t, rm.ScopeMetrics, 1)
+	assert.Equal(t, "go.opentelemetry.io/collector/service", rm.ScopeMetrics[0].Scope.Name)
+
+	actualNames := make([]string, len(rm.ScopeMetrics[0].Metrics))
+	for i, m := range rm.ScopeMetrics[0].Metrics {
+		actualNames[i] = m.Name
+	}
+	assert.ElementsMatch(t, []string{
+		"otelcol_process_cpu_seconds",
+		"otelcol_process_memory_rss",
+		"otelcol_process_runtime_heap_alloc_bytes",
+		"otelcol_process_runtime_total_alloc_bytes",
+		"otelcol_process_runtime_total_sys_memory_bytes",
+		"otelcol_process_uptime",
+	}, actualNames)
+}
+
+func TestServiceTelemetryDefaultViews(t *testing.T) {
+	var views []otelconf.View
 	set := newNopSettings()
-	set.BuildInfo = component.BuildInfo{Version: "test version", Command: otelCommand}
-
-	cfg := newNopConfig()
-	cfg.Telemetry.Metrics.Readers = []config.MetricReader{
-		{
-			Pull: &config.PullMetricReader{
-				Exporter: config.PullMetricExporter{
-					Prometheus: metricsAddr,
-				},
-			},
+	set.TelemetryFactory = telemetry.NewFactory(
+		func() component.Config { return nil },
+		func(_ context.Context, set telemetry.Settings, _ component.Config) (telemetry.Providers, error) {
+			views = set.DefaultViews(configtelemetry.LevelBasic)
+			return telemetrytest.NewProviders(), nil
 		},
-	}
-	cfg.Telemetry.Resource = make(map[string]*string)
-	// Include resource attributes under the service::telemetry::resource key.
-	for k, v := range tc.userDefinedResource {
-		cfg.Telemetry.Resource[k] = v
-	}
+	)
 
-	// Start a service and check that metrics are produced as expected.
-	// We do this twice to ensure that the server is stopped cleanly.
-	for i := 0; i < 2; i++ {
-		srv, err := New(context.Background(), set, cfg)
-		require.NoError(t, err)
-
-		require.NoError(t, srv.Start(context.Background()))
-
-		// Wait for the HTTP server to start.
-		promHost := fmt.Sprintf("%s:%d", *metricsAddr.Host, *metricsAddr.Port)
-		require.Eventually(t, func() bool {
-			resp, err := http.Get("http://" + promHost + "/metrics")
-			if err != nil {
-				return false
-			}
-			defer resp.Body.Close()
-			return resp.StatusCode == http.StatusOK
-		}, 10*time.Second, 50*time.Millisecond)
-
-		assertResourceLabels(t, srv.telemetrySettings.Resource, tc.expectedLabels)
-		assertMetrics(t, promHost, tc.expectedLabels)
-		require.NoError(t, srv.Shutdown(context.Background()))
-	}
+	srv, err := New(context.Background(), set, newNopConfig())
+	require.NoError(t, err)
+	require.NoError(t, srv.Start(context.Background()))
+	defer func() {
+		assert.NoError(t, srv.Shutdown(context.Background()))
+	}()
+	require.NotEmpty(t, views)
 }
 
 // TestServiceTelemetryZPages verifies that the zpages extension works correctly with servce telemetry.
@@ -426,21 +297,63 @@ func testZPages(t *testing.T, zpagesAddr string) {
 
 	cfg := newNopConfig()
 	cfg.Extensions = []component.ID{component.MustNewID("zpages")}
-	cfg.Telemetry.Logs.Level = zapcore.FatalLevel // disable logs
+
+	// The zpages extension will register/unregister a span processor with
+	// the tracer provider, so long as it implements the right methods,
+	// like the opentelemetry-go SDK implementation.
+	registered := make(chan struct{}, 1)
+	unregistered := make(chan struct{}, 1)
+	set.TelemetryFactory = telemetry.NewFactory(
+		func() component.Config { return nil },
+		func(context.Context, telemetry.Settings, component.Config) (telemetry.Providers, error) {
+			return telemetrytest.NewProviders(
+				telemetrytest.WithTracerProvider(
+					&registerableTracerProvider{
+						TracerProvider: noop.NewTracerProvider(),
+						registerSpanProcessor: func(sp sdktrace.SpanProcessor) {
+							assert.IsType(t, sp, &zpages.SpanProcessor{})
+							registered <- struct{}{}
+						},
+						unregisterSpanProcessor: func(sp sdktrace.SpanProcessor) {
+							assert.IsType(t, sp, &zpages.SpanProcessor{})
+							unregistered <- struct{}{}
+						},
+					},
+				),
+			), nil
+		},
+	)
 
 	// Start a service and check that zpages is healthy.
 	// We do this twice to ensure that the server is stopped cleanly.
 	for i := 0; i < 2; i++ {
 		srv, err := New(context.Background(), set, cfg)
 		require.NoError(t, err)
+
 		require.NoError(t, srv.Start(context.Background()))
+		<-registered
 
 		assert.Eventually(t, func() bool {
 			return zpagesHealthy(zpagesAddr)
 		}, 10*time.Second, 100*time.Millisecond, "zpages endpoint is not healthy")
 
 		require.NoError(t, srv.Shutdown(context.Background()))
+		<-unregistered
 	}
+}
+
+type registerableTracerProvider struct {
+	trace.TracerProvider
+	registerSpanProcessor   func(sdktrace.SpanProcessor)
+	unregisterSpanProcessor func(sdktrace.SpanProcessor)
+}
+
+func (p *registerableTracerProvider) RegisterSpanProcessor(sp sdktrace.SpanProcessor) {
+	p.registerSpanProcessor(sp)
+}
+
+func (p *registerableTracerProvider) UnregisterSpanProcessor(sp sdktrace.SpanProcessor) {
+	p.unregisterSpanProcessor(sp)
 }
 
 func zpagesHealthy(zpagesAddr string) bool {
@@ -466,93 +379,60 @@ func zpagesHealthy(zpagesAddr string) bool {
 	return true
 }
 
-// TestServiceTelemetryRestart tests that the service correctly restarts the telemetry server.
+// TestServiceTelemetryRestart tests that the service starts and shuts down telemetry as expected.
 func TestServiceTelemetryRestart(t *testing.T) {
-	metricsAddr := promtest.GetAvailableLocalAddressPrometheus(t)
-	cfg := newNopConfig()
-	cfg.Telemetry.Metrics.Readers = []config.MetricReader{
-		{
-			Pull: &config.PullMetricReader{
-				Exporter: config.PullMetricExporter{
-					Prometheus: metricsAddr,
-				},
-			},
+	telemetryCreated := make(chan struct{}, 1)
+	telemetryShutdown := make(chan struct{}, 1)
+
+	set := newNopSettings()
+	set.TelemetryFactory = telemetry.NewFactory(
+		func() component.Config { return nil },
+		func(context.Context, telemetry.Settings, component.Config) (telemetry.Providers, error) {
+			telemetryCreated <- struct{}{}
+			return telemetrytest.NewProviders(
+				telemetrytest.WithShutdown(func(context.Context) error {
+					telemetryShutdown <- struct{}{}
+					return nil
+				}),
+			), nil
 		},
-	}
-	// Create a service
-	srvOne, err := New(context.Background(), newNopSettings(), cfg)
-	require.NoError(t, err)
-
-	// URL of the telemetry service metrics endpoint
-	telemetryURL := fmt.Sprintf("http://%s:%d/metrics", *metricsAddr.Host, *metricsAddr.Port)
-
-	// Start the service
-	require.NoError(t, srvOne.Start(context.Background()))
-
-	// check telemetry server to ensure we get a response
-	var resp *http.Response
-
-	//nolint:gosec
-	resp, err = http.Get(telemetryURL)
-	assert.NoError(t, err)
-	assert.NoError(t, resp.Body.Close())
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	// Response body must be closed now instead of defer as the test
-	// restarts the server on the same port. Leaving response open
-	// leaks a goroutine.
-	resp.Body.Close()
-
-	// Shutdown the service
-	require.NoError(t, srvOne.Shutdown(context.Background()))
-
-	// Create a new service with the same telemetry
-	srvTwo, err := New(context.Background(), newNopSettings(), cfg)
-	require.NoError(t, err)
-
-	// Start the new service
-	require.NoError(t, srvTwo.Start(context.Background()))
-
-	// check telemetry server to ensure we get a response
-	require.Eventually(t,
-		func() bool {
-			//nolint:gosec
-			resp, err = http.Get(telemetryURL)
-			assert.NoError(t, resp.Body.Close())
-			return err == nil
-		},
-		500*time.Millisecond,
-		100*time.Millisecond,
-		"Must get a valid response from the service",
 	)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	// Shutdown the new service
-	assert.NoError(t, srvTwo.Shutdown(context.Background()))
+	for i := 0; i < 2; i++ {
+		// Create and start a service, telemetry should be created.
+		srv, err := New(context.Background(), set, newNopConfig())
+		require.NoError(t, err)
+		require.NoError(t, srv.Start(context.Background()))
+		<-telemetryCreated
+
+		// Shutdown the service, telemetry should be shutdown.
+		require.NoError(t, srv.Shutdown(context.Background()))
+		<-telemetryShutdown
+	}
 }
 
 func TestServiceTelemetryShutdownError(t *testing.T) {
-	cfg := newNopConfig()
-	cfg.Telemetry.Logs.Level = zapcore.DebugLevel
-	cfg.Telemetry.Logs.Processors = []config.LogRecordProcessor{{
-		Batch: &config.BatchLogRecordProcessor{
-			Exporter: config.LogRecordExporter{
-				OTLP: &config.OTLP{
-					Protocol: ptr("http/protobuf"),
-					Endpoint: ptr("http://testing.invalid"),
-				},
-			},
+	set := newNopSettings()
+	set.TelemetryFactory = telemetry.NewFactory(
+		func() component.Config { return nil },
+		func(context.Context, telemetry.Settings, component.Config) (telemetry.Providers, error) {
+			return telemetrytest.NewProviders(
+				telemetrytest.WithShutdown(func(context.Context) error {
+					return errors.New("an exception occurred")
+				}),
+			), nil
 		},
-	}}
+	)
 
 	// Create and start a service
-	srv, err := New(context.Background(), newNopSettings(), cfg)
+	cfg := newNopConfig()
+	srv, err := New(context.Background(), set, cfg)
 	require.NoError(t, err)
 	require.NoError(t, srv.Start(context.Background()))
 
 	// Shutdown the service
 	err = srv.Shutdown(context.Background())
-	assert.ErrorContains(t, err, `failed to shutdown telemetry`)
+	assert.EqualError(t, err, "failed to shutdown telemetry providers: an exception occurred")
 }
 
 func TestExtensionNotificationFailure(t *testing.T) {
@@ -631,129 +511,18 @@ func TestServiceFatalError(t *testing.T) {
 	require.ErrorIs(t, err, assert.AnError)
 }
 
-func TestServiceInvalidTelemetryConfiguration(t *testing.T) {
-	tests := []struct {
-		name    string
-		wantErr error
-		cfg     otelconftelemetry.Config
-	}{
-		{
-			name: "log config with processors and invalid config",
-			cfg: otelconftelemetry.Config{
-				Logs: otelconftelemetry.LogsConfig{
-					Encoding: "console",
-					Processors: []config.LogRecordProcessor{
-						{
-							Batch: &config.BatchLogRecordProcessor{
-								Exporter: config.LogRecordExporter{
-									OTLP: &config.OTLP{},
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: errors.New("no valid log exporter"),
+func TestServiceTelemetryCreateProvidersError(t *testing.T) {
+	set := newNopSettings()
+	set.TelemetryFactory = telemetry.NewFactory(
+		func() component.Config { return nil },
+		func(context.Context, telemetry.Settings, component.Config) (telemetry.Providers, error) {
+			return nil, errors.New("something went wrong")
 		},
-	}
-	for _, tt := range tests {
-		set := newNopSettings()
-		set.AsyncErrorChannel = make(chan error)
+	)
 
-		cfg := newNopConfig()
-		cfg.Telemetry = tt.cfg
-		_, err := New(context.Background(), set, cfg)
-		if tt.wantErr != nil {
-			require.ErrorContains(t, err, tt.wantErr.Error())
-		} else {
-			require.NoError(t, err)
-		}
-	}
-}
-
-func assertResourceLabels(t *testing.T, res pcommon.Resource, expectedLabels map[string]labelValue) {
-	for key, labelValue := range expectedLabels {
-		lookupKey, ok := prometheusToOtelConv[key]
-		if !ok {
-			lookupKey = key
-		}
-		value, ok := res.Attributes().Get(lookupKey)
-		switch labelValue.state {
-		case labelNotPresent:
-			assert.False(t, ok)
-		case labelAnyValue:
-			assert.True(t, ok)
-		default:
-			assert.Equal(t, labelValue.label, value.AsString())
-		}
-	}
-}
-
-func assertMetrics(t *testing.T, metricsAddr string, expectedLabels map[string]labelValue) {
-	client := &http.Client{}
-	resp, err := client.Get("http://" + metricsAddr + "/metrics")
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		assert.NoError(t, resp.Body.Close())
-	})
-	reader := bufio.NewReader(resp.Body)
-
-	var parser expfmt.TextParser
-	parsed, err := parser.TextToMetricFamilies(reader)
-	require.NoError(t, err)
-
-	prefix := "otelcol"
-	expectedMetrics := map[string]bool{
-		"target_info":                                    false,
-		"otelcol_process_memory_rss":                     false,
-		"otelcol_process_cpu_seconds":                    false,
-		"otelcol_process_runtime_total_sys_memory_bytes": false,
-		"otelcol_process_runtime_heap_alloc_bytes":       false,
-		"otelcol_process_runtime_total_alloc_bytes":      false,
-		"otelcol_process_uptime":                         false,
-		"promhttp_metric_handler_errors_total":           false,
-	}
-	for metricName, metricFamily := range parsed {
-		if _, ok := expectedMetrics[metricName]; !ok {
-			require.True(t, ok, "unexpected metric: %s", metricName)
-		}
-		expectedMetrics[metricName] = true
-		if metricName == "promhttp_metric_handler_errors_total" {
-			continue
-		}
-		if metricName != "target_info" {
-			// require is used here so test fails with a single message.
-			require.True(
-				t,
-				strings.HasPrefix(metricName, prefix),
-				"expected prefix %q but string starts with %q",
-				prefix,
-				metricName[:len(prefix)+1]+"...")
-		}
-
-		for _, metric := range metricFamily.Metric {
-			labelMap := map[string]string{}
-			for _, labelPair := range metric.Label {
-				labelMap[*labelPair.Name] = *labelPair.Value
-			}
-
-			for k, v := range expectedLabels {
-				switch v.state {
-				case labelNotPresent:
-					_, present := labelMap[k]
-					assert.Falsef(t, present, "label %q must not be present", k)
-				case labelSpecificValue:
-					require.Equalf(t, v.label, labelMap[k], "mandatory label %q value mismatch", k)
-				case labelAnyValue:
-					assert.NotEmptyf(t, labelMap[k], "mandatory label %q not present", k)
-				}
-			}
-		}
-	}
-	for k, val := range expectedMetrics {
-		require.True(t, val, "missing metric: %s", k)
-	}
+	cfg := newNopConfig()
+	_, err := New(context.Background(), set, cfg)
+	require.EqualError(t, err, "failed to create telemetry providers: something went wrong")
 }
 
 func newNopSettings() Settings {
@@ -762,6 +531,12 @@ func newNopSettings() Settings {
 	connectorsConfigs, connectorsFactories := builders.NewNopConnectorConfigsAndFactories()
 	exportersConfigs, exportersFactories := builders.NewNopExporterConfigsAndFactories()
 	extensionsConfigs, extensionsFactories := builders.NewNopExtensionConfigsAndFactories()
+	telemetryFactory := telemetry.NewFactory(
+		func() component.Config { return nil },
+		func(context.Context, telemetry.Settings, component.Config) (telemetry.Providers, error) {
+			return telemetrytest.NewProviders(), nil
+		},
+	)
 
 	return Settings{
 		BuildInfo:           component.NewDefaultBuildInfo(),
@@ -777,6 +552,7 @@ func newNopSettings() Settings {
 		ExtensionsConfigs:   extensionsConfigs,
 		ExtensionsFactories: extensionsFactories,
 		AsyncErrorChannel:   make(chan error),
+		TelemetryFactory:    telemetryFactory,
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/collector/processor/processortest"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receivertest"
+	"go.opentelemetry.io/collector/service/telemetry/otelconftelemetry"
 )
 
 func nopFactories() (Factories, error) {
@@ -65,6 +66,11 @@ func nopFactories() (Factories, error) {
 	for _, proc := range factories.Processors {
 		factories.ProcessorModules[proc.Type()] = "go.opentelemetry.io/collector/processor/processortest v1.2.3"
 	}
+
+	// TODO update this to use a telemetrytest-based factory once.
+	// This will require updating various tests.
+	factories.Telemetry = otelconftelemetry.NewFactory()
+	factories.TelemetryModule = "go.opentelemetry.io/collector/service/telemetry/otelconftelemetry v1.2.3"
 
 	return factories, err
 }

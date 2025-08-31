@@ -37,7 +37,6 @@ import (
 	"go.opentelemetry.io/collector/service/internal/proctelemetry"
 	"go.opentelemetry.io/collector/service/internal/status"
 	"go.opentelemetry.io/collector/service/telemetry"
-	"go.opentelemetry.io/collector/service/telemetry/otelconftelemetry"
 )
 
 // This feature gate is deprecated and will be removed in 1.40.0. Views can now be configured.
@@ -94,6 +93,9 @@ type Settings struct {
 
 	// LoggingOptions provides a way to change behavior of zap logging.
 	LoggingOptions []zap.Option
+
+	// TelemetryFactory is the factory for creating internal telemetry providers.
+	TelemetryFactory telemetry.Factory
 }
 
 // Service represents the implementation of a component.Host.
@@ -123,18 +125,13 @@ func New(ctx context.Context, set Settings, cfg Config) (*Service, error) {
 		collectorConf: set.CollectorConf,
 	}
 
-	mpConfig := &cfg.Telemetry.Metrics.MeterProvider
-	if mpConfig.Views == nil {
-		mpConfig.Views = configureViews(cfg.Telemetry.Metrics.Level)
-	}
-
-	telFactory := otelconftelemetry.NewFactory()
 	telset := telemetry.Settings{
-		BuildInfo:  set.BuildInfo,
-		ZapOptions: set.LoggingOptions,
+		BuildInfo:    set.BuildInfo,
+		ZapOptions:   set.LoggingOptions,
+		DefaultViews: configureViews,
 	}
 
-	telProviders, err := telFactory.CreateProviders(ctx, telset, &cfg.Telemetry)
+	telProviders, err := set.TelemetryFactory.CreateProviders(ctx, telset, cfg.Telemetry)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create telemetry providers: %w", err)
 	}
@@ -193,10 +190,8 @@ func New(ctx context.Context, set Settings, cfg Config) (*Service, error) {
 		return nil, err
 	}
 
-	if cfg.Telemetry.Metrics.Level != configtelemetry.LevelNone && len(mpConfig.Readers) != 0 {
-		if err = proctelemetry.RegisterProcessMetrics(srv.telemetrySettings); err != nil {
-			return nil, fmt.Errorf("failed to register process metrics: %w", err)
-		}
+	if err := proctelemetry.RegisterProcessMetrics(srv.telemetrySettings); err != nil {
+		return nil, fmt.Errorf("failed to register process metrics: %w", err)
 	}
 	return srv, nil
 }
