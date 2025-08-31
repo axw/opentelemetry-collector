@@ -6,7 +6,9 @@ package otelconftelemetry
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -254,4 +256,83 @@ func TestInstrumentEnabled(t *testing.T) {
 	floatGauge, err := meter.Float64Gauge("int64.updowncounter")
 	require.NoError(t, err)
 	assert.Implements(t, new(enabledInstrument), floatGauge)
+}
+
+func TestDefaultViews(t *testing.T) {
+	type testcase struct {
+		configuredViews          []config.View
+		expectDefaultViewsCalled bool
+		expectMetricNames        []string
+	}
+
+	for name, tc := range map[string]testcase{
+		"NoConfiguredViews": {
+			configuredViews:          nil,
+			expectDefaultViewsCalled: true,
+			expectMetricNames:        []string{"b_counter", "c_counter"},
+		},
+		"ConfiguredViews": {
+			configuredViews: []config.View{{
+				Selector: &config.ViewSelector{
+					MeterName: ptr("b"),
+				},
+				Stream: &config.ViewStream{
+					Aggregation: &config.ViewStreamAggregation{
+						Drop: config.ViewStreamAggregationDrop{},
+					},
+				},
+			}},
+			expectDefaultViewsCalled: false,
+			expectMetricNames:        []string{"a_counter", "c_counter"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var called bool
+			var set telemetry.Settings
+			set.DefaultViews = func(level configtelemetry.Level) []config.View {
+				called = true
+				assert.Equal(t, configtelemetry.LevelDetailed, level)
+				return []config.View{{
+					Selector: &config.ViewSelector{
+						MeterName: ptr("a"),
+					},
+					Stream: &config.ViewStream{
+						Aggregation: &config.ViewStreamAggregation{
+							Drop: config.ViewStreamAggregationDrop{},
+						},
+					},
+				}}
+			}
+
+			addr := promtest.GetAvailableLocalAddressPrometheus(t)
+			cfg := createDefaultConfig().(*Config)
+			cfg.Metrics.Level = configtelemetry.LevelDetailed
+			cfg.Metrics.Views = tc.configuredViews
+			cfg.Metrics.Readers = []config.MetricReader{{
+				Pull: &config.PullMetricReader{
+					Exporter: config.PullMetricExporter{Prometheus: addr},
+				},
+			}}
+
+			providers, _ := newTelemetryProviders(t, set, cfg)
+			defer func() {
+				assert.NoError(t, providers.Shutdown(t.Context()))
+			}()
+			meterProvider := providers.MeterProvider()
+			assert.Equal(t, tc.expectDefaultViewsCalled, called)
+
+			for _, meterName := range []string{"a", "b", "c"} {
+				meter := meterProvider.Meter(meterName)
+				int64Counter, err := meter.Int64Counter(meterName + "_counter")
+				require.NoError(t, err)
+				int64Counter.Add(t.Context(), 1)
+			}
+
+			endpoint := fmt.Sprintf("http://%s:%d/metrics", *addr.Host, *addr.Port)
+			metrics := getMetricsFromPrometheus(t, endpoint)
+			delete(metrics, "target_info")
+			delete(metrics, "promhttp_metric_handler_errors_total")
+			assert.ElementsMatch(t, tc.expectMetricNames, slices.Collect(maps.Keys(metrics)))
+		})
+	}
 }

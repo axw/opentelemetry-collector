@@ -13,14 +13,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	otelconf "go.opentelemetry.io/contrib/otelconf/v0.3.0"
-	"go.opentelemetry.io/contrib/zpages"
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/logtest"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/trace"
-	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -206,7 +203,7 @@ func TestServiceTelemetryLogging(t *testing.T) {
 func TestServiceTelemetryMetrics(t *testing.T) {
 	// Start a service and check that metrics are produced as expected.
 	// We do this twice to ensure that the server is stopped cleanly.
-	for range 2 {
+	for i := 0; i < 2; i++ {
 		reader := metric.NewManualReader()
 		set := newNopSettings()
 		set.TelemetryFactory = telemetry.NewFactory(
@@ -299,27 +296,14 @@ func testZPages(t *testing.T, zpagesAddr string) {
 	cfg.Extensions = []component.ID{component.MustNewID("zpages")}
 
 	// The zpages extension will register/unregister a span processor with
-	// the tracer provider, so long as it implements the right methods,
-	// like the opentelemetry-go SDK implementation.
-	registered := make(chan struct{}, 1)
-	unregistered := make(chan struct{}, 1)
+	// the tracer provider if it implements the RegisterSpanProcessor and
+	// UnregisterSpanProcessor methods of the opentelemetry-go SDK implementation.
+	// Hence we use sdktrace below, rather than the noop tracer provider.
 	set.TelemetryFactory = telemetry.NewFactory(
 		func() component.Config { return nil },
 		func(context.Context, telemetry.Settings, component.Config) (telemetry.Providers, error) {
 			return telemetrytest.NewProviders(
-				telemetrytest.WithTracerProvider(
-					&registerableTracerProvider{
-						TracerProvider: noop.NewTracerProvider(),
-						registerSpanProcessor: func(sp sdktrace.SpanProcessor) {
-							assert.IsType(t, sp, &zpages.SpanProcessor{})
-							registered <- struct{}{}
-						},
-						unregisterSpanProcessor: func(sp sdktrace.SpanProcessor) {
-							assert.IsType(t, sp, &zpages.SpanProcessor{})
-							unregistered <- struct{}{}
-						},
-					},
-				),
+				telemetrytest.WithTracerProvider(sdktrace.NewTracerProvider()),
 			), nil
 		},
 	)
@@ -329,31 +313,14 @@ func testZPages(t *testing.T, zpagesAddr string) {
 	for i := 0; i < 2; i++ {
 		srv, err := New(context.Background(), set, cfg)
 		require.NoError(t, err)
-
 		require.NoError(t, srv.Start(context.Background()))
-		<-registered
 
 		assert.Eventually(t, func() bool {
 			return zpagesHealthy(zpagesAddr)
 		}, 10*time.Second, 100*time.Millisecond, "zpages endpoint is not healthy")
 
 		require.NoError(t, srv.Shutdown(context.Background()))
-		<-unregistered
 	}
-}
-
-type registerableTracerProvider struct {
-	trace.TracerProvider
-	registerSpanProcessor   func(sdktrace.SpanProcessor)
-	unregisterSpanProcessor func(sdktrace.SpanProcessor)
-}
-
-func (p *registerableTracerProvider) RegisterSpanProcessor(sp sdktrace.SpanProcessor) {
-	p.registerSpanProcessor(sp)
-}
-
-func (p *registerableTracerProvider) UnregisterSpanProcessor(sp sdktrace.SpanProcessor) {
-	p.unregisterSpanProcessor(sp)
 }
 
 func zpagesHealthy(zpagesAddr string) bool {
