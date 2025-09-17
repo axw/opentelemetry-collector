@@ -6,6 +6,8 @@
 package hostcapabilities // import "go.opentelemetry.io/collector/service/hostcapabilities"
 
 import (
+	"net/http"
+
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pipeline"
 	"go.opentelemetry.io/collector/service/internal/moduleinfo"
@@ -33,4 +35,10 @@ type ComponentFactory interface {
 	// GetFactory returns the component factory for the given
 	// component type
 	GetFactory(kind component.Kind, componentType component.Type) component.Factory
+}
+
+// ZPages is an interface that may be implemented by the host to provide
+// a zPages HTTP mux, for components to provide or expose diagnostics.
+type ZPages interface {
+	GetZPagesMux() *http.ServeMux
 }
