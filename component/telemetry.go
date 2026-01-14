@@ -4,6 +4,8 @@
 package component // import "go.opentelemetry.io/collector/component"
 
 import (
+	"context"
+
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -31,4 +33,41 @@ type TelemetrySettings struct {
 
 	// prevent unkeyed literal initialization
 	_ struct{}
+}
+
+// ContextLogger returns a logger from the context, or the TelemetrySettings's
+// logger if none is found. This allows components to use a logger that has
+// been decorated with context-specific fields, such as trace or request IDs.
+func (s *TelemetrySettings) ContextLogger(ctx context.Context) *zap.Logger {
+	if logger, ok := LoggerFromContext(ctx); ok {
+		return logger
+	}
+	return s.Logger
+}
+
+// NOTE: code below probably belongs elsewhere, e.g. in a telemetry package
+
+type loggerKey struct{}
+
+func LoggerFromContext(ctx context.Context) (*zap.Logger, bool) {
+	logger, ok := ctx.Value(loggerKey{}).(*zap.Logger)
+	return logger, ok
+}
+
+func ContextWithLogger(ctx context.Context, logger *zap.Logger) context.Context {
+	if logger == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, loggerKey{}, logger)
+}
+
+func TraceContextFields(ctx context.Context) []zap.Field {
+	tracer := trace.SpanFromContext(ctx).SpanContext()
+	if !tracer.IsValid() {
+		return nil
+	}
+	return []zap.Field{
+		zap.String("trace_id", tracer.TraceID().String()),
+		zap.String("span_id", tracer.SpanID().String()),
+	}
 }

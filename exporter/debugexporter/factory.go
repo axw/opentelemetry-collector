@@ -55,7 +55,7 @@ func createDefaultConfig() component.Config {
 func createTraces(ctx context.Context, set exporter.Settings, config component.Config) (exporter.Traces, error) {
 	cfg := config.(*Config)
 	exporterLogger := createLogger(cfg, set.Logger)
-	debug := newDebugExporter(exporterLogger, cfg.Verbosity)
+	debug := newDebugExporter(set.TelemetrySettings, exporterLogger, cfg.Verbosity)
 	return exporterhelper.NewTraces(ctx, set, config,
 		debug.pushTraces,
 		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
@@ -68,7 +68,7 @@ func createTraces(ctx context.Context, set exporter.Settings, config component.C
 func createMetrics(ctx context.Context, set exporter.Settings, config component.Config) (exporter.Metrics, error) {
 	cfg := config.(*Config)
 	exporterLogger := createLogger(cfg, set.Logger)
-	debug := newDebugExporter(exporterLogger, cfg.Verbosity)
+	debug := newDebugExporter(set.TelemetrySettings, exporterLogger, cfg.Verbosity)
 	return exporterhelper.NewMetrics(ctx, set, config,
 		debug.pushMetrics,
 		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
@@ -81,7 +81,7 @@ func createMetrics(ctx context.Context, set exporter.Settings, config component.
 func createLogs(ctx context.Context, set exporter.Settings, config component.Config) (exporter.Logs, error) {
 	cfg := config.(*Config)
 	exporterLogger := createLogger(cfg, set.Logger)
-	debug := newDebugExporter(exporterLogger, cfg.Verbosity)
+	debug := newDebugExporter(set.TelemetrySettings, exporterLogger, cfg.Verbosity)
 	return exporterhelper.NewLogs(ctx, set, config,
 		debug.pushLogs,
 		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
@@ -94,7 +94,7 @@ func createLogs(ctx context.Context, set exporter.Settings, config component.Con
 func createProfiles(ctx context.Context, set exporter.Settings, config component.Config) (xexporter.Profiles, error) {
 	cfg := config.(*Config)
 	exporterLogger := createLogger(cfg, set.Logger)
-	debug := newDebugExporter(exporterLogger, cfg.Verbosity)
+	debug := newDebugExporter(set.TelemetrySettings, exporterLogger, cfg.Verbosity)
 	return xexporterhelper.NewProfiles(ctx, set, config,
 		debug.pushProfiles,
 		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),

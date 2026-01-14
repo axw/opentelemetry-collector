@@ -248,6 +248,9 @@ func (sc *ServerConfig) ToServer(ctx context.Context, extensions map[component.I
 		handler = responseHeadersHandler(handler, sc.ResponseHeaders)
 	}
 
+	// Add a logger to the context.
+	handler = &loggerHandler{next: handler, settings: settings}
+
 	otelOpts := append(
 		[]otelhttp.Option{
 			otelhttp.WithTracerProvider(settings.TracerProvider),

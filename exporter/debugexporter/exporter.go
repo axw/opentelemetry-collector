@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configtelemetry"
 	"go.opentelemetry.io/collector/exporter/debugexporter/internal/normal"
 	"go.opentelemetry.io/collector/exporter/debugexporter/internal/otlptext"
@@ -19,6 +20,7 @@ import (
 
 type debugExporter struct {
 	verbosity         configtelemetry.Level
+	settings          component.TelemetrySettings
 	logger            *zap.Logger
 	logsMarshaler     plog.Marshaler
 	metricsMarshaler  pmetric.Marshaler
@@ -26,7 +28,7 @@ type debugExporter struct {
 	profilesMarshaler pprofile.Marshaler
 }
 
-func newDebugExporter(logger *zap.Logger, verbosity configtelemetry.Level) *debugExporter {
+func newDebugExporter(set component.TelemetrySettings, logger *zap.Logger, verbosity configtelemetry.Level) *debugExporter {
 	var logsMarshaler plog.Marshaler
 	var metricsMarshaler pmetric.Marshaler
 	var tracesMarshaler ptrace.Marshaler
@@ -44,6 +46,7 @@ func newDebugExporter(logger *zap.Logger, verbosity configtelemetry.Level) *debu
 	}
 	return &debugExporter{
 		verbosity:         verbosity,
+		settings:          set,
 		logger:            logger,
 		logsMarshaler:     logsMarshaler,
 		metricsMarshaler:  metricsMarshaler,
@@ -52,8 +55,9 @@ func newDebugExporter(logger *zap.Logger, verbosity configtelemetry.Level) *debu
 	}
 }
 
-func (s *debugExporter) pushTraces(_ context.Context, td ptrace.Traces) error {
-	s.logger.Info("Traces",
+func (s *debugExporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
+	ctxlogger := s.settings.ContextLogger(ctx)
+	ctxlogger.Info("Traces",
 		zap.Int("resource spans", td.ResourceSpans().Len()),
 		zap.Int("spans", td.SpanCount()))
 	if s.verbosity == configtelemetry.LevelBasic {
@@ -68,8 +72,9 @@ func (s *debugExporter) pushTraces(_ context.Context, td ptrace.Traces) error {
 	return nil
 }
 
-func (s *debugExporter) pushMetrics(_ context.Context, md pmetric.Metrics) error {
-	s.logger.Info("Metrics",
+func (s *debugExporter) pushMetrics(ctx context.Context, md pmetric.Metrics) error {
+	ctxlogger := s.settings.ContextLogger(ctx)
+	ctxlogger.Info("Metrics",
 		zap.Int("resource metrics", md.ResourceMetrics().Len()),
 		zap.Int("metrics", md.MetricCount()),
 		zap.Int("data points", md.DataPointCount()))
@@ -85,8 +90,9 @@ func (s *debugExporter) pushMetrics(_ context.Context, md pmetric.Metrics) error
 	return nil
 }
 
-func (s *debugExporter) pushLogs(_ context.Context, ld plog.Logs) error {
-	s.logger.Info("Logs",
+func (s *debugExporter) pushLogs(ctx context.Context, ld plog.Logs) error {
+	ctxlogger := s.settings.ContextLogger(ctx)
+	ctxlogger.Info("Logs",
 		zap.Int("resource logs", ld.ResourceLogs().Len()),
 		zap.Int("log records", ld.LogRecordCount()))
 
@@ -102,8 +108,9 @@ func (s *debugExporter) pushLogs(_ context.Context, ld plog.Logs) error {
 	return nil
 }
 
-func (s *debugExporter) pushProfiles(_ context.Context, pd pprofile.Profiles) error {
-	s.logger.Info("Profiles",
+func (s *debugExporter) pushProfiles(ctx context.Context, pd pprofile.Profiles) error {
+	ctxlogger := s.settings.ContextLogger(ctx)
+	ctxlogger.Info("Profiles",
 		zap.Int("resource profiles", pd.ResourceProfiles().Len()),
 		zap.Int("sample records", pd.SampleCount()))
 
