@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/telemetry"
 )
 
 type loggerHandler struct {
@@ -16,7 +17,7 @@ type loggerHandler struct {
 
 func (h *loggerHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
-	logger := h.settings.ContextLogger(ctx).WithLazy(component.TraceContextFields(ctx)...)
-	ctx = component.ContextWithLogger(ctx, logger)
+	logger := h.settings.ContextLogger(ctx).WithLazy(telemetry.TraceContextFields(ctx)...)
+	ctx = telemetry.ContextWithLogger(ctx, logger)
 	h.next.ServeHTTP(w, req.WithContext(ctx))
 }

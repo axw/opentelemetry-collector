@@ -111,3 +111,5 @@ replace go.opentelemetry.io/collector/confmap/xconfmap => ../../../confmap/xconf
 replace go.opentelemetry.io/collector/internal/testutil => ../../../internal/testutil
 
 replace go.opentelemetry.io/collector/internal/componentalias => ../../../internal/componentalias
+
+replace go.opentelemetry.io/collector/telemetry => ../../../telemetry
