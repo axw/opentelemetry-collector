@@ -13,6 +13,7 @@ import (
 	otlphttpexporter "go.opentelemetry.io/collector/exporter/otlphttpexporter"
 	"go.opentelemetry.io/collector/extension"
 	memorylimiterextension "go.opentelemetry.io/collector/extension/memorylimiterextension"
+	httpscrapercontroller "go.opentelemetry.io/collector/extension/xextension/scrapercontroller/httpscrapercontroller"
 	timescrapercontroller "go.opentelemetry.io/collector/extension/xextension/scrapercontroller/timescrapercontroller"
 	zpagesextension "go.opentelemetry.io/collector/extension/zpagesextension"
 	"go.opentelemetry.io/collector/otelcol"
@@ -50,6 +51,7 @@ func components() (otelcol.Factories, error) {
 		memorylimiterextension.NewFactory(),
 		zpagesextension.NewFactory(),
 		timescrapercontroller.NewFactory(),
+		httpscrapercontroller.NewFactory(),
 	)
 	if err != nil {
 		return otelcol.Factories{}, err
@@ -58,6 +60,7 @@ func components() (otelcol.Factories, error) {
 		memorylimiterextension.NewFactory().Type(): "go.opentelemetry.io/collector/extension/memorylimiterextension v0.143.0",
 		zpagesextension.NewFactory().Type():        "go.opentelemetry.io/collector/extension/zpagesextension v0.143.0",
 		timescrapercontroller.NewFactory().Type():  "go.opentelemetry.io/collector/extension/xextension/scrapercontroller/timescrapercontroller v0.143.0",
+		httpscrapercontroller.NewFactory().Type():  "go.opentelemetry.io/collector/extension/xextension/scrapercontroller/httpscrapercontroller v0.143.0",
 	})
 
 	factories.Receivers, err = otelcol.MakeFactoryMap[receiver.Factory](

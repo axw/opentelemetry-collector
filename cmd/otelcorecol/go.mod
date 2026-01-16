@@ -21,6 +21,7 @@ require (
 	go.opentelemetry.io/collector/exporter/otlphttpexporter v0.143.0
 	go.opentelemetry.io/collector/extension v1.49.0
 	go.opentelemetry.io/collector/extension/memorylimiterextension v0.143.0
+	go.opentelemetry.io/collector/extension/xextension/scrapercontroller/httpscrapercontroller v0.143.0
 	go.opentelemetry.io/collector/extension/xextension/scrapercontroller/timescrapercontroller v0.143.0
 	go.opentelemetry.io/collector/extension/zpagesextension v0.143.0
 	go.opentelemetry.io/collector/otelcol v0.143.0
@@ -352,3 +353,5 @@ replace go.opentelemetry.io/collector/scraper/scraperhelper => ../../scraper/scr
 replace go.opentelemetry.io/collector/extension/xextension/scrapercontroller => ../../extension/xextension/scrapercontroller
 
 replace go.opentelemetry.io/collector/extension/xextension/scrapercontroller/timescrapercontroller => ../../extension/xextension/scrapercontroller/timescrapercontroller
+
+replace go.opentelemetry.io/collector/extension/xextension/scrapercontroller/httpscrapercontroller => ../../extension/xextension/scrapercontroller/httpscrapercontroller

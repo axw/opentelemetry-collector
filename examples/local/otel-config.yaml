@@ -3,11 +3,13 @@ extensions:
     endpoint: localhost:55679
   timescrapercontroller:
     collection_interval: 1s
+  httpscrapercontroller:
+    endpoint: "localhost:1234"
 
 receivers:
   debugscraper:
     collection_interval: 0s
-    controllers: [timescrapercontroller]
+    controllers: [httpscrapercontroller]
   otlp:
     protocols:
       grpc:
@@ -42,4 +44,4 @@ service:
       processors: [memory_limiter]
       exporters: [debug]
 
-  extensions: [zpages, timescrapercontroller]
+  extensions: [zpages, timescrapercontroller, httpscrapercontroller]
