@@ -36,6 +36,13 @@ func TestScrapeControllerSettings(t *testing.T) {
 			},
 			errVal: `"timeout": requires positive value`,
 		},
+		{
+			name: "disabled controller requires controllers list",
+			set: ControllerConfig{
+				ControllerEnabled: func() *bool { b := false; return &b }(),
+			},
+			errVal: `"controllers": must be set when "controller_enabled" is false`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

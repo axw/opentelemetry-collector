@@ -5,19 +5,48 @@ package scraperhelper // import "go.opentelemetry.io/collector/scraper/scraperhe
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/pipeline"
 	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.opentelemetry.io/collector/scraper"
 	"go.opentelemetry.io/collector/scraper/scrapererror"
 	"go.opentelemetry.io/collector/scraper/scraperhelper/internal/controller"
 )
 
 type ControllerConfig = controller.ControllerConfig
+
+type metricsScraperRegistry interface {
+	RegisterMetrics(scraper.Metrics, consumer.Metrics) (component.ShutdownFunc, error)
+}
+
+type logsScraperRegistry interface {
+	RegisterLogs(scraper.Logs, consumer.Logs) (component.ShutdownFunc, error)
+}
+
+type obsMetricsConsumer struct {
+	next consumer.Metrics
+	obs  *receiverhelper.ObsReport
+}
+
+func (o obsMetricsConsumer) Capabilities() consumer.Capabilities {
+	return o.next.Capabilities()
+}
+
+func (o obsMetricsConsumer) ConsumeMetrics(ctx context.Context, md pmetric.Metrics) error {
+	dataPointCount := md.DataPointCount()
+	ctx = o.obs.StartMetricsOp(ctx)
+	err := o.next.ConsumeMetrics(ctx, md)
+	o.obs.EndMetricsOp(ctx, "", dataPointCount, err)
+	return err
+}
 
 // NewDefaultControllerConfig returns default scraper controller
 // settings with a collection interval of one minute.
@@ -100,8 +129,19 @@ func NewLogsController(cfg *ControllerConfig,
 		}
 		scrapers = append(scrapers, s)
 	}
-	return controller.NewController[scraper.Logs](
-		cfg, rSet, scrapers, func(c *controller.Controller[scraper.Logs]) { scrapeLogs(c, nextConsumer) }, co.tickerCh)
+	scrapeFunc := func(c *controller.Controller[scraper.Logs]) {
+		scrapeLogs(c, nextConsumer)
+	}
+	startExternalController := createStartExternalController(
+		scrapers, nextConsumer, logsScraperRegistry.RegisterLogs, pipeline.SignalLogs,
+	)
+	c, err := controller.NewController[scraper.Logs](
+		cfg, rSet, scrapers, scrapeFunc, startExternalController, co.tickerCh,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
 // NewMetricsController creates a receiver.Metrics with the configured options, that can control multiple scraper.Metrics.
@@ -124,8 +164,58 @@ func NewMetricsController(cfg *ControllerConfig,
 		}
 		scrapers = append(scrapers, s)
 	}
-	return controller.NewController[scraper.Metrics](
-		cfg, rSet, scrapers, func(c *controller.Controller[scraper.Metrics]) { scrapeMetrics(c, nextConsumer) }, co.tickerCh)
+	scrapeFunc := func(c *controller.Controller[scraper.Metrics]) {
+		scrapeMetrics(c, nextConsumer)
+	}
+	startExternalController := createStartExternalController(
+		scrapers, nextConsumer, metricsScraperRegistry.RegisterMetrics, pipeline.SignalMetrics,
+	)
+	c, err := controller.NewController[scraper.Metrics](
+		cfg, rSet, scrapers, scrapeFunc, startExternalController, co.tickerCh,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func createStartExternalController[ScraperT, RegistryT, ConsumerT any](
+	scrapers []ScraperT, nextConsumer ConsumerT,
+	registerScraper func(registry RegistryT, scraper ScraperT, consumer ConsumerT) (component.ShutdownFunc, error),
+	signal pipeline.Signal,
+) func(ctx context.Context, host component.Host, id component.ID) (component.ShutdownFunc, error) {
+	return func(ctx context.Context, host component.Host, id component.ID) (component.ShutdownFunc, error) {
+		exts := host.GetExtensions()
+		if exts == nil {
+			return nil, errors.New("host does not support extensions")
+		}
+		ext, ok := exts[id]
+		if !ok {
+			return nil, fmt.Errorf("controller extension %q not found", id)
+		}
+		registry, ok := ext.(RegistryT)
+		if !ok {
+			return nil, fmt.Errorf("extension %q does not support controlling %s scrapers", id, signal)
+		}
+		shutdownFuncs := make([]component.ShutdownFunc, len(scrapers))
+		for i, scraper := range scrapers {
+			shutdown, err := registerScraper(registry, scraper, nextConsumer)
+			if err != nil {
+				// TODO unregister previously registered scrapers.
+				return nil, err
+			}
+			shutdownFuncs[i] = shutdown
+		}
+		return func(ctx context.Context) error {
+			var err error
+			for _, shutdown := range shutdownFuncs {
+				if shutdownErr := shutdown(ctx); shutdownErr != nil {
+					err = errors.Join(err, shutdownErr)
+				}
+			}
+			return err
+		}, nil
+	}
 }
 
 func scrapeLogs(c *controller.Controller[scraper.Logs], nextConsumer consumer.Logs) {

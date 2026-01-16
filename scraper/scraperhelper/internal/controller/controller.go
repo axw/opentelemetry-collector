@@ -7,6 +7,7 @@ package controller // import "go.opentelemetry.io/collector/scraper/scraperhelpe
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 	"go.opentelemetry.io/collector/scraper"
 )
 
+var errNoExternalControllerRegistration = errors.New("controller_enabled is false but no external controller registration was configured")
+
 type Controller[T component.Component] struct {
 	collectionInterval time.Duration
 	initialDelay       time.Duration
@@ -26,6 +29,10 @@ type Controller[T component.Component] struct {
 	Scrapers   []T
 	scrapeFunc func(*Controller[T])
 	tickerCh   <-chan time.Time
+
+	startExternalController func(context.Context, component.Host, component.ID) (component.ShutdownFunc, error)
+	externalControllerIDs   []component.ID
+	externalControllers     []component.ShutdownFunc
 
 	done chan struct{}
 	wg   sync.WaitGroup
@@ -38,6 +45,7 @@ func NewController[T component.Component](
 	rSet receiver.Settings,
 	scrapers []T,
 	scrapeFunc func(*Controller[T]),
+	startExternalController func(context.Context, component.Host, component.ID) (component.ShutdownFunc, error),
 	tickerCh <-chan time.Time,
 ) (*Controller[T], error) {
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
@@ -50,14 +58,16 @@ func NewController[T component.Component](
 	}
 
 	cs := &Controller[T]{
-		collectionInterval: cfg.CollectionInterval,
-		initialDelay:       cfg.InitialDelay,
-		Timeout:            cfg.Timeout,
-		Scrapers:           scrapers,
-		scrapeFunc:         scrapeFunc,
-		done:               make(chan struct{}),
-		tickerCh:           tickerCh,
-		Obsrecv:            obsrecv,
+		collectionInterval:      cfg.CollectionInterval,
+		initialDelay:            cfg.InitialDelay,
+		Timeout:                 cfg.Timeout,
+		Scrapers:                scrapers,
+		scrapeFunc:              scrapeFunc,
+		startExternalController: startExternalController,
+		externalControllerIDs:   cfg.Controllers,
+		done:                    make(chan struct{}),
+		tickerCh:                tickerCh,
+		Obsrecv:                 obsrecv,
 	}
 
 	return cs, nil
@@ -70,13 +80,33 @@ func (sc *Controller[T]) Start(ctx context.Context, host component.Host) error {
 			return err
 		}
 	}
-
-	sc.startScraping()
+	if sc.startExternalController != nil {
+		for _, id := range sc.externalControllerIDs {
+			c, err := sc.startExternalController(ctx, host, id)
+			if err != nil {
+				return err
+			}
+			sc.externalControllers = append(sc.externalControllers, c)
+		}
+	} else if len(sc.externalControllerIDs) > 0 {
+		return errors.New("external controllers configured but no registration function provided")
+	}
+	if sc.collectionInterval > 0 {
+		sc.startScraping()
+	}
 	return nil
 }
 
 // Shutdown the receiver, invoked during service shutdown.
 func (sc *Controller[T]) Shutdown(ctx context.Context) error {
+	// Stop controllers before scrapers, to ensure the scrapers
+	// aren't called after they're shutdown.
+	for _, c := range sc.externalControllers {
+		if err := c.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+
 	// Signal the goroutine to stop.
 	close(sc.done)
 	sc.wg.Wait()
@@ -84,7 +114,6 @@ func (sc *Controller[T]) Shutdown(ctx context.Context) error {
 	for _, scrp := range sc.Scrapers {
 		errs = multierr.Append(errs, scrp.Shutdown(ctx))
 	}
-
 	return errs
 }
 
