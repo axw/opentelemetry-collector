@@ -19,8 +19,6 @@ import (
 	"go.opentelemetry.io/collector/scraper"
 )
 
-var errNoExternalControllerRegistration = errors.New("controller_enabled is false but no external controller registration was configured")
-
 type Controller[T component.Component] struct {
 	collectionInterval time.Duration
 	initialDelay       time.Duration

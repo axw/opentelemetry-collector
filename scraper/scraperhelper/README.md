@@ -31,24 +31,18 @@ for calling `Scrape*()` and forwarding results to the pipeline consumer.
 
 Config fields:
 
-- `controller_enabled`: set to `false` to disable the built-in time-based controller
 - `controllers`: list of extension IDs that act as scraper controllers
 
 Example (receiver-specific fields omitted):
 
 ```yaml
 extensions:
-  timer_controller_60s:
-    # This extension must be included in the distribution build.
-    # The extension type is "timer_controller".
-    type: timer_controller
-    collection_interval: 60s
-    initial_delay: 1s
+  httpscrapercontroller:
+    endpoint: localhost:1234
     timeout: 10s
 
 receivers:
   some_scraping_receiver:
-    controller:
-      controller_enabled: false
-      controllers: [timer_controller_60s]
+    collection_interval: 0s # disable built-in time-based controller
+    controllers: [httpscrapercontroller]
 ```
