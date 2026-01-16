@@ -1,8 +1,13 @@
 extensions:
   zpages:
     endpoint: localhost:55679
+  timescrapercontroller:
+    collection_interval: 1s
 
 receivers:
+  debugscraper:
+    collection_interval: 0s
+    controllers: [timescrapercontroller]
   otlp:
     protocols:
       grpc:
@@ -29,7 +34,7 @@ service:
       processors: [memory_limiter]
       exporters: [debug]
     metrics:
-      receivers: [otlp]
+      receivers: [otlp, debugscraper]
       processors: [memory_limiter]
       exporters: [debug]
     logs:
@@ -37,4 +42,4 @@ service:
       processors: [memory_limiter]
       exporters: [debug]
 
-  extensions: [zpages]
+  extensions: [zpages, timescrapercontroller]

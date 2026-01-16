@@ -8,13 +8,14 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/extension"
-)
 
-var typeStr = component.MustNewType("timer_controller")
+	"go.opentelemetry.io/collector/extension/xextension/scrapercontroller/timescrapercontroller/internal/metadata"
+)
 
 // NewFactory creates a factory for the time-based scraper controller extension.
 func NewFactory() extension.Factory {
-	return extension.NewFactory(typeStr,
+	return extension.NewFactory(
+		metadata.Type,
 		func() component.Config { return createDefaultConfig() },
 		create,
 		component.StabilityLevelAlpha,

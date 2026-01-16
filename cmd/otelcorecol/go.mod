@@ -21,12 +21,14 @@ require (
 	go.opentelemetry.io/collector/exporter/otlphttpexporter v0.143.0
 	go.opentelemetry.io/collector/extension v1.49.0
 	go.opentelemetry.io/collector/extension/memorylimiterextension v0.143.0
+	go.opentelemetry.io/collector/extension/xextension/scrapercontroller/timescrapercontroller v0.143.0
 	go.opentelemetry.io/collector/extension/zpagesextension v0.143.0
 	go.opentelemetry.io/collector/otelcol v0.143.0
 	go.opentelemetry.io/collector/processor v1.49.0
 	go.opentelemetry.io/collector/processor/batchprocessor v0.143.0
 	go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.143.0
 	go.opentelemetry.io/collector/receiver v1.49.0
+	go.opentelemetry.io/collector/receiver/debugscraper v0.143.0
 	go.opentelemetry.io/collector/receiver/nopreceiver v0.143.0
 	go.opentelemetry.io/collector/receiver/otlpreceiver v0.143.0
 	go.opentelemetry.io/collector/service v0.143.0
@@ -115,6 +117,7 @@ require (
 	go.opentelemetry.io/collector/extension/extensionmiddleware v0.143.0 // indirect
 	go.opentelemetry.io/collector/extension/extensiontest v0.143.0 // indirect
 	go.opentelemetry.io/collector/extension/xextension v0.143.0 // indirect
+	go.opentelemetry.io/collector/extension/xextension/scrapercontroller v0.0.0-00010101000000-000000000000 // indirect
 	go.opentelemetry.io/collector/featuregate v1.49.0 // indirect
 	go.opentelemetry.io/collector/internal/componentalias v0.0.0-00010101000000-000000000000 // indirect
 	go.opentelemetry.io/collector/internal/fanoutconsumer v0.143.0 // indirect
@@ -134,6 +137,8 @@ require (
 	go.opentelemetry.io/collector/receiver/receiverhelper v0.143.0 // indirect
 	go.opentelemetry.io/collector/receiver/receivertest v0.143.0 // indirect
 	go.opentelemetry.io/collector/receiver/xreceiver v0.143.0 // indirect
+	go.opentelemetry.io/collector/scraper v1.49.0 // indirect
+	go.opentelemetry.io/collector/scraper/scraperhelper v0.143.0 // indirect
 	go.opentelemetry.io/collector/service/hostcapabilities v0.143.0 // indirect
 	go.opentelemetry.io/contrib/bridges/otelzap v0.13.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.63.0 // indirect
@@ -324,6 +329,8 @@ replace go.opentelemetry.io/collector/receiver => ../../receiver
 
 replace go.opentelemetry.io/collector/receiver/nopreceiver => ../../receiver/nopreceiver
 
+replace go.opentelemetry.io/collector/receiver/debugscraper => ../../receiver/debugscraper
+
 replace go.opentelemetry.io/collector/receiver/receiverhelper => ../../receiver/receiverhelper
 
 replace go.opentelemetry.io/collector/receiver/otlpreceiver => ../../receiver/otlpreceiver
@@ -337,3 +344,11 @@ replace go.opentelemetry.io/collector/service => ../../service
 replace go.opentelemetry.io/collector/service/hostcapabilities => ../../service/hostcapabilities
 
 replace go.opentelemetry.io/collector/service/telemetry/telemetrytest => ../../service/telemetry/telemetrytest
+
+replace go.opentelemetry.io/collector/scraper => ../../scraper
+
+replace go.opentelemetry.io/collector/scraper/scraperhelper => ../../scraper/scraperhelper
+
+replace go.opentelemetry.io/collector/extension/xextension/scrapercontroller => ../../extension/xextension/scrapercontroller
+
+replace go.opentelemetry.io/collector/extension/xextension/scrapercontroller/timescrapercontroller => ../../extension/xextension/scrapercontroller/timescrapercontroller

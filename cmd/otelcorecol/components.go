@@ -13,12 +13,14 @@ import (
 	otlphttpexporter "go.opentelemetry.io/collector/exporter/otlphttpexporter"
 	"go.opentelemetry.io/collector/extension"
 	memorylimiterextension "go.opentelemetry.io/collector/extension/memorylimiterextension"
+	timescrapercontroller "go.opentelemetry.io/collector/extension/xextension/scrapercontroller/timescrapercontroller"
 	zpagesextension "go.opentelemetry.io/collector/extension/zpagesextension"
 	"go.opentelemetry.io/collector/otelcol"
 	"go.opentelemetry.io/collector/processor"
 	batchprocessor "go.opentelemetry.io/collector/processor/batchprocessor"
 	memorylimiterprocessor "go.opentelemetry.io/collector/processor/memorylimiterprocessor"
 	"go.opentelemetry.io/collector/receiver"
+	debugscraper "go.opentelemetry.io/collector/receiver/debugscraper"
 	nopreceiver "go.opentelemetry.io/collector/receiver/nopreceiver"
 	otlpreceiver "go.opentelemetry.io/collector/receiver/otlpreceiver"
 	"go.opentelemetry.io/collector/service/telemetry/otelconftelemetry"
@@ -47,6 +49,7 @@ func components() (otelcol.Factories, error) {
 	factories.Extensions, err = otelcol.MakeFactoryMap[extension.Factory](
 		memorylimiterextension.NewFactory(),
 		zpagesextension.NewFactory(),
+		timescrapercontroller.NewFactory(),
 	)
 	if err != nil {
 		return otelcol.Factories{}, err
@@ -54,11 +57,13 @@ func components() (otelcol.Factories, error) {
 	factories.ExtensionModules = makeModulesMap(factories.Extensions, map[component.Type]string{
 		memorylimiterextension.NewFactory().Type(): "go.opentelemetry.io/collector/extension/memorylimiterextension v0.143.0",
 		zpagesextension.NewFactory().Type():        "go.opentelemetry.io/collector/extension/zpagesextension v0.143.0",
+		timescrapercontroller.NewFactory().Type():  "go.opentelemetry.io/collector/extension/xextension/scrapercontroller/timescrapercontroller v0.143.0",
 	})
 
 	factories.Receivers, err = otelcol.MakeFactoryMap[receiver.Factory](
 		nopreceiver.NewFactory(),
 		otlpreceiver.NewFactory(),
+		debugscraper.NewFactory(),
 	)
 	if err != nil {
 		return otelcol.Factories{}, err
@@ -66,6 +71,7 @@ func components() (otelcol.Factories, error) {
 	factories.ReceiverModules = makeModulesMap(factories.Receivers, map[component.Type]string{
 		nopreceiver.NewFactory().Type():  "go.opentelemetry.io/collector/receiver/nopreceiver v0.143.0",
 		otlpreceiver.NewFactory().Type(): "go.opentelemetry.io/collector/receiver/otlpreceiver v0.143.0",
+		debugscraper.NewFactory().Type(): "go.opentelemetry.io/collector/receiver/debugscraper v0.143.0",
 	})
 
 	factories.Exporters, err = otelcol.MakeFactoryMap[exporter.Factory](

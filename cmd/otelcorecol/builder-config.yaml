@@ -15,6 +15,7 @@ dist:
 receivers:
   - gomod: go.opentelemetry.io/collector/receiver/nopreceiver v0.143.0
   - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.143.0
+  - gomod: go.opentelemetry.io/collector/receiver/debugscraper v0.143.0
 exporters:
   - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.143.0
   - gomod: go.opentelemetry.io/collector/exporter/nopexporter v0.143.0
@@ -23,6 +24,7 @@ exporters:
 extensions:
   - gomod: go.opentelemetry.io/collector/extension/memorylimiterextension v0.143.0
   - gomod: go.opentelemetry.io/collector/extension/zpagesextension v0.143.0
+  - gomod: go.opentelemetry.io/collector/extension/xextension/scrapercontroller/timescrapercontroller v0.143.0
 processors:
   - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.143.0
   - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.143.0
@@ -111,6 +113,7 @@ replaces:
   - go.opentelemetry.io/collector/processor/processorhelper => ../../processor/processorhelper
   - go.opentelemetry.io/collector/receiver => ../../receiver
   - go.opentelemetry.io/collector/receiver/nopreceiver => ../../receiver/nopreceiver
+  - go.opentelemetry.io/collector/receiver/debugscraper => ../../receiver/debugscraper
   - go.opentelemetry.io/collector/receiver/receiverhelper => ../../receiver/receiverhelper
   - go.opentelemetry.io/collector/receiver/otlpreceiver => ../../receiver/otlpreceiver
   - go.opentelemetry.io/collector/receiver/receivertest => ../../receiver/receivertest
@@ -118,3 +121,7 @@ replaces:
   - go.opentelemetry.io/collector/service => ../../service
   - go.opentelemetry.io/collector/service/hostcapabilities => ../../service/hostcapabilities
   - go.opentelemetry.io/collector/service/telemetry/telemetrytest => ../../service/telemetry/telemetrytest
+  - go.opentelemetry.io/collector/scraper => ../../scraper
+  - go.opentelemetry.io/collector/scraper/scraperhelper => ../../scraper/scraperhelper
+  - go.opentelemetry.io/collector/extension/xextension/scrapercontroller => ../../extension/xextension/scrapercontroller
+  - go.opentelemetry.io/collector/extension/xextension/scrapercontroller/timescrapercontroller => ../../extension/xextension/scrapercontroller/timescrapercontroller
