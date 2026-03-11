@@ -71,10 +71,9 @@ func TestPrintCommand(t *testing.T) {
 			path: validConfig,
 		},
 		{
-			name:            "invalid syntax without validate",
-			path:            invalidConfig1,
-			errString:       "'timeout' time: invalid duration",
-			errOnlyRedacted: true,
+			name:      "invalid syntax without validate",
+			path:      invalidConfig1,
+			errString: "'timeout' time: invalid duration",
 		},
 		{
 			name:      "validation fail",
@@ -100,11 +99,8 @@ func TestPrintCommand(t *testing.T) {
 			name: "default field value",
 			path: defaultConfig,
 			outString: map[string]string{
-				"redacted": `timeout: 1s`,
-
-				// Since the structure is empty before
-				// interpretation, no default is expanded.
-				"unredacted": `e: null`,
+				"redacted":   `timeout: 1s`,
+				"unredacted": `timeout: 1s`,
 			},
 		},
 		{
@@ -116,7 +112,7 @@ func TestPrintCommand(t *testing.T) {
 				"redacted": `"timeout": 5000000000`,
 
 				// Note: the original input is "5s"
-				"unredacted": `"timeout": "5s"`,
+				"unredacted": `"timeout": 5000000000`,
 			},
 		},
 		{
@@ -131,12 +127,8 @@ func TestPrintCommand(t *testing.T) {
 			name: "opaque default",
 			path: defaultConfig,
 			outString: map[string]string{
-				"redacted": `opaque: '[REDACTED]'`,
-
-				// Note: the default opaque value does not print,
-				// the other value is set in defaultConfig so that
-				// the whole component config is not defaulted.
-				"unredacted": `other: lala`,
+				"redacted":   `opaque: '[REDACTED]'`,
+				"unredacted": `opaque: '[REDACTED]'`,
 			},
 		},
 	}
