@@ -220,6 +220,20 @@ func getTagInfo(field reflect.StructField) *tagInfo {
 	return &info
 }
 
+// StringTextUnredactedHookFunc returns a DecodeHookFuncValue that bypasses
+// TextMarshaler for string-kinded types (like configopaque.String),
+// returning the underlying string value instead.
+func StringTextUnredactedHookFunc() mapstructure.DecodeHookFuncValue {
+	return func(from, _ reflect.Value) (any, error) {
+		if from.Kind() == reflect.String {
+			if _, ok := from.Interface().(encoding.TextMarshaler); ok {
+				return from.String(), nil
+			}
+		}
+		return from.Interface(), nil
+	}
+}
+
 // TextMarshalerHookFunc returns a DecodeHookFuncValue that checks
 // for the encoding.TextMarshaler interface and calls the MarshalText
 // function if found.

@@ -8,6 +8,15 @@ import (
 	"go.opentelemetry.io/collector/confmap/internal"
 )
 
+// WithUnredacted returns a MarshalOption that causes configopaque.String values
+// to be marshaled as their underlying string value rather than "[REDACTED]".
+// This is experimental and may change or be removed in future versions.
+func WithUnredacted() confmap.MarshalOption {
+	return internal.MarshalOptionFunc(func(opts *internal.MarshalOptions) {
+		opts.OpaqueUnredacted = true
+	})
+}
+
 // ExpandedValue represents a configuration value that has been expanded from a template
 // (e.g., environment variable substitution). It contains both the parsed value and the
 // original string representation.
